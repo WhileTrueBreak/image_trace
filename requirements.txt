@@ -1,0 +1,9 @@
+basicsr==1.4.2
+image_slicer==2.1.1
+matplotlib==3.5.1
+moviepy==1.0.3
+opencv_python==4.8.1.78
+Pillow
+realesrgan==0.3.0
+torchvision==0.15.2
+tqdm==4.66.1
