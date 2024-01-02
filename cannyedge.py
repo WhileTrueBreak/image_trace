@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import math
 import sys
 import imageFilter
+import os
+import random
 
 # from basicsr.archs.rrdbnet_arch import RRDBNet
 # from realesrgan import RealESRGANer
@@ -126,17 +128,29 @@ def formatPaths(path, img, norm=(1,1)):
     paths.sort(key=pathDist, reverse=True)
     return paths
 
-def formatPathsJava(paths):
-    print('formatting paths for java')
-    arr = [formatPathJava(path) for path in paths]
+def exportPathsJava(paths):
+    print('exporting paths for java')
+    arr = [exportPathJava(path) for path in paths]
     return f'Vector2D[][] paths = {{{",".join(arr)}}};'
     return arr
 
-def formatPathJava(path):
+def exportPathJava(path):
     fArr = []
     for coord in path:
         fArr.append(f'new Vector2D({round(coord[0], 4)},{round(coord[1], 4)})')
     string = f'{{{",".join(fArr)}}}'
+    return string
+
+def exportPathsString(paths):
+    print('exporting paths as string')
+    arr = [exportPathString(path) for path in paths]
+    return "|".join(arr)
+
+def exportPathString(path):
+    fArr = []
+    for coord in path:
+        fArr.append(f'{round(coord[0], 4)},{round(coord[1], 4)}')
+    string = f'{"-".join(fArr)}'
     return string
 
 def plotPaths(paths):
@@ -156,15 +170,135 @@ def plotPaths(paths):
 
     plt.show()
 
+def cleanPaths(paths):
+    print('cleaning paths')
+    new = [cleanPath(i) for i in paths]
+    print(f'Paths: {len(paths)}')
+    print(f'Nodes: {sum(len(i)for i in paths)}')
+    return new
+
+def cleanPath(path, threshhold=0.0001):
+    newPath = []
+    last = None
+    for i,e in enumerate(path):
+        if last and (e[0]-last[0])**2+(e[1]-last[1])**2 < threshhold**2: continue
+        newPath.append(e)
+        last = e
+    return newPath
+
+def getRemoveSimilarPaths(paths, threshhold=0.001):
+    print('removing overlap')
+    toRemove = set()
+    done = set()
+    total = len(paths)*len(paths)
+    tlength = len(str(total))
+    barLength,_ = os.get_terminal_size()
+    barLength -= tlength*2 + 3
+    count = 0
+    for i,p1 in enumerate(paths):
+        for j,p2 in enumerate(paths):
+            count += 1
+            if p1 == p2: continue
+            if i in toRemove: continue
+            if (i,j) in done: continue
+            if j in toRemove: continue
+
+            p1B = getBounds(p1)
+            p2B = getBounds(p2)
+
+            if checkBounds(p1B, p2B, threshhold*2): continue
+            if checkBounds(p2B, p1B, threshhold*2): done.add((j,i))
+
+            print(f'|{"="*int(count/total*barLength)}{"_"*(barLength-int(count/total*barLength))}|{str(count).zfill(tlength)}/{total}', end='\r')
+            dist, maxd = getPathAverageDist(p1, p2, threshhold=threshhold)
+            if not dist: continue
+            if dist < threshhold: toRemove.add(i)
+    print(f'|{"="*barLength}|{str(count).zfill(tlength)}/{total}')
+    print(f'removing {len(toRemove)} paths')
+    for i in sorted(toRemove, reverse=True):
+        del paths[i]
+    
+    print(f'Paths: {len(paths)}')
+    print(f'Nodes: {sum(len(i)for i in paths)}')
+
+def checkBounds(b1, b2, threshhold):
+    if b1[0] >= b2[0]-threshhold and b1[1] >= b2[1]-threshhold and b1[2] <= b2[2]+threshhold and b1[3] <= b2[3]+threshhold: return False
+    return True
+
+def getBounds(path):
+    x, y, X, Y = 1, 1, 0, 0
+    for e in path:
+        if e[0] < x: x = e[0]
+        if e[1] < y: y = e[1]
+        if e[0] > X: X = e[0]
+        if e[1] > Y: Y = e[1]
+    return x, y, X, Y
+
+def getPathAverageDist(p1, p2, threshhold=0.001):
+    maxd = 0
+    p1d = 0
+    p1l = len(p1)
+    for i,e in enumerate(p1):
+        dist = getDistFromPath(p2, e)
+        if dist > threshhold*5: return None, dist
+        if dist > maxd: maxd = dist
+        p1d += dist
+        if p1d/p1l > threshhold: return None, maxd
+    p1d /= p1l
+    return p1d, maxd
+
+def getDistFromPath(path, point):
+    last = path[-1]
+    minDist = float('inf')
+    for i,e in enumerate(path):
+        dist = getDistFromLine(last, e, point)
+        if dist < minDist: minDist = dist
+        last = e
+    return minDist;
+
+def getDistFromLine(l1, l2, point):
+    p = np.array(point)
+    a = np.array(l1)
+    b = np.array(l2)
+    # Handle case where p is a single point, i.e. 1d array.
+    p = np.atleast_2d(p)
+
+    # TODO for you: consider implementing @Eskapp's suggestions
+    if np.all(a == b):
+        return np.linalg.norm(p - a, axis=1)
+
+    # normalized tangent vector
+    d = np.divide(b - a, np.linalg.norm(b - a))
+
+    # signed parallel distance components
+    s = np.dot(a - p, d)
+    t = np.dot(p - b, d)
+
+    # clamped parallel distance
+    h = np.maximum.reduce([s, t, np.zeros(len(p))])
+
+    # perpendicular distance component, as before
+    # note that for the 3D case these will be vectors
+    c = np.cross(p - a, d)
+
+    # use hypot for Pythagoras to improve accuracy
+    return np.hypot(h, c)[0]
+
+def writeToFile(filename, text):
+    with open(filename, "w") as file:
+        file.write(text)
+
 def main():
     img_name = sys.argv[1]
     path, fimg = getPaths(img_name)
     paths = formatPaths(path, fimg)
+    paths = cleanPaths(paths)
 
-    txt_name = img_name.split('.')[0]+'.txt'
-    with open(txt_name, "w") as file:
-        string = formatPathsJava(paths)
-        file.write(string)
+    getRemoveSimilarPaths(paths, threshhold=0.005)
+
+    txt_name = img_name.split('.')[0]+'_c'+'.txt'
+    string = exportPathsString(paths)
+    writeToFile(txt_name, string)
     plotPaths(paths)
 
 if __name__ == '__main__':
